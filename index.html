@@ -514,7 +514,8 @@
                 outputEl.innerHTML = '';
             },
 
-            neofetch: () => {
+            neofetch: (args) => {
+                // neofetch is a built-in command that works without installing
                 const arch = `
 <span class="ascii-art">                   -\`                    </span> <span class="prompt-user">arch@archlinux</span>
 <span class="ascii-art">                  .o+\`                   </span> ----------------
@@ -680,12 +681,19 @@ Total Installed Size:  ${pkg.size}
                                             appendOutput(`<span class="success">(1/1) installing ${pkgName}</span>                    [######################] 100%`);
                                             
                                             // Actually add to installed packages
-                                            if (!installedPackages.find(p => p.name === pkgName)) {
-                                                installedPackages.push({ name: pkgName, version: pkg.version });
-                                                installedPackages.sort((a, b) => a.name.localeCompare(b.name));
+                                            const existingIdx = installedPackages.findIndex(p => p.name === pkgName);
+                                            const pkgVersion = pkg.version || '1.0.0-1';
+                                            if (existingIdx === -1) {
+                                                installedPackages.push({ name: pkgName, version: pkgVersion });
+                                                console.log('Installed package:', pkgName, 'Total packages:', installedPackages.length);
+                                            } else {
+                                                // Update version if reinstalling
+                                                installedPackages[existingIdx].version = pkgVersion;
                                             }
+                                            installedPackages.sort((a, b) => a.name.localeCompare(b.name));
                                             
                                             appendOutput(`<span class="success">:: ${pkgName} has been installed successfully!</span>`);
+                                            appendOutput(`<span class="info">You can now use the '${pkgName}' command!</span>`);
                                             inputEl.disabled = false;
                                             inputEl.focus();
                                             scrollToBottom();
@@ -1490,9 +1498,47 @@ PID: ${Math.floor(Math.random() * 10000)}
 <span class="success">Ready to accept connections</span> (simulated)`);
             },
 
-            neofetch: () => {
-                commands.neofetch();
-            }
+        };
+
+        // Command to package mapping - which package provides which command
+        const commandToPackage = {
+            'htop': 'htop',
+            'btop': 'btop',
+            'firefox': 'firefox',
+            'chromium': 'chromium',
+            'docker': 'docker',
+            'wget': 'wget',
+            'curl': 'curl',
+            'nginx': 'nginx',
+            'code': 'code',
+            'vlc': 'vlc',
+            'discord': 'discord',
+            'spotify': 'spotify',
+            'steam': 'steam',
+            'gimp': 'gimp',
+            'blender': 'blender',
+            'obs-studio': 'obs-studio',
+            'obs': 'obs-studio',
+            'tmux': 'tmux',
+            'zsh': 'zsh',
+            'fzf': 'fzf',
+            'ripgrep': 'ripgrep',
+            'rg': 'ripgrep',
+            'bat': 'bat',
+            'exa': 'exa',
+            'rust': 'rust',
+            'rustc': 'rust',
+            'cargo': 'rust',
+            'go': 'go',
+            'node': 'nodejs',
+            'npm': 'nodejs',
+            'python3': 'python',
+            'pip': 'python',
+            'postgresql': 'postgresql',
+            'psql': 'postgresql',
+            'redis': 'redis',
+            'redis-cli': 'redis',
+            'redis-server': 'redis'
         };
 
         // Check if a package is installed
@@ -1513,24 +1559,17 @@ PID: ${Math.floor(Math.random() * 10000)}
                 return;
             }
 
+            // Check for package commands that are pre-installed (nodejs, python are in default install)
+            const preInstalledCommands = ['node', 'npm', 'python3', 'pip'];
+            if (preInstalledCommands.includes(cmd) && packageCommands[cmd]) {
+                packageCommands[cmd](args);
+                return;
+            }
+
             // Check if it's a package command
             if (packageCommands[cmd]) {
-                // Find the package name (might be different from command name)
-                const pkgMapping = {
-                    'rg': 'ripgrep',
-                    'obs': 'obs-studio',
-                    'rustc': 'rust',
-                    'cargo': 'rust',
-                    'psql': 'postgresql',
-                    'redis-cli': 'redis',
-                    'redis-server': 'redis',
-                    'node': 'nodejs',
-                    'npm': 'nodejs',
-                    'python3': 'python',
-                    'pip': 'python'
-                };
-                
-                const requiredPkg = pkgMapping[cmd] || cmd;
+                // Find the package name that provides this command
+                const requiredPkg = commandToPackage[cmd] || cmd;
                 
                 if (isPackageInstalled(requiredPkg)) {
                     packageCommands[cmd](args);
@@ -1538,6 +1577,14 @@ PID: ${Math.floor(Math.random() * 10000)}
                     appendOutput(`bash: ${cmd}: command not found`, 'error');
                     appendOutput(`<span class="info">Hint: Install with 'pacman -S ${requiredPkg}'</span>`);
                 }
+                return;
+            }
+
+            // Check if this might be a command from a package we know about
+            if (commandToPackage[cmd]) {
+                const requiredPkg = commandToPackage[cmd];
+                appendOutput(`bash: ${cmd}: command not found`, 'error');
+                appendOutput(`<span class="info">Hint: Install with 'pacman -S ${requiredPkg}'</span>`);
                 return;
             }
 
