@@ -1,0 +1,1621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arch Linux Terminal</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background: #1a1a2e;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .terminal {
+            background: #0d0d0d;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            max-width: 1200px;
+            margin: 0 auto;
+            height: calc(100vh - 40px);
+            display: flex;
+            flex-direction: column;
+        }
+        .terminal-header {
+            background: linear-gradient(to bottom, #3c3c3c, #2a2a2a);
+            padding: 10px 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 1px solid #1a1a1a;
+        }
+        .terminal-btn {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+        }
+        .btn-close { background: #ff5f56; }
+        .btn-minimize { background: #ffbd2e; }
+        .btn-maximize { background: #27ca3f; }
+        .terminal-title {
+            color: #aaa;
+            font-size: 13px;
+            margin-left: 10px;
+        }
+        .terminal-body {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            color: #c8c8c8;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .terminal-body::-webkit-scrollbar {
+            width: 8px;
+        }
+        .terminal-body::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        .terminal-body::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+        }
+        .output-line {
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .prompt {
+            color: #1793d1;
+            font-weight: bold;
+        }
+        .prompt-user {
+            color: #27ca3f;
+        }
+        .prompt-path {
+            color: #1793d1;
+        }
+        .input-line {
+            display: flex;
+            align-items: center;
+        }
+        #command-input {
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: inherit;
+            font-size: 14px;
+            flex: 1;
+            outline: none;
+            caret-color: #1793d1;
+        }
+        .error { color: #ff5f56; }
+        .success { color: #27ca3f; }
+        .info { color: #1793d1; }
+        .warning { color: #ffbd2e; }
+        .directory { color: #1793d1; font-weight: bold; }
+        .executable { color: #27ca3f; }
+        .file { color: #c8c8c8; }
+        .symlink { color: #ff79c6; }
+        .ascii-art { color: #1793d1; }
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 16px;
+            background: #1793d1;
+            animation: blink 1s infinite;
+            vertical-align: middle;
+            margin-left: 2px;
+        }
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal">
+        <div class="terminal-header">
+            <button class="terminal-btn btn-close"></button>
+            <button class="terminal-btn btn-minimize"></button>
+            <button class="terminal-btn btn-maximize"></button>
+            <span class="terminal-title">arch@localhost: ~</span>
+        </div>
+        <div class="terminal-body" id="terminal-body">
+            <div id="output"></div>
+            <div class="input-line">
+                <span id="prompt"></span>
+                <input type="text" id="command-input" autofocus autocomplete="off" spellcheck="false">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Virtual File System
+        const fileSystem = {
+            '/': {
+                type: 'dir',
+                children: ['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'mnt', 'opt', 'proc', 'root', 'run', 'srv', 'sys', 'tmp', 'usr', 'var']
+            },
+            '/home': {
+                type: 'dir',
+                children: ['arch']
+            },
+            '/home/arch': {
+                type: 'dir',
+                children: ['.bashrc', '.config', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos', 'projects', 'README.md']
+            },
+            '/home/arch/.bashrc': {
+                type: 'file',
+                content: '# ~/.bashrc\n\n# If not running interactively, don\'t do anything\n[[ $- != *i* ]] && return\n\nalias ls=\'ls --color=auto\'\nalias grep=\'grep --color=auto\'\nPS1=\'[\\u@\\h \\W]\\$ \'\n\nexport EDITOR=vim\nexport PATH="$HOME/.local/bin:$PATH"'
+            },
+            '/home/arch/.config': {
+                type: 'dir',
+                children: ['nvim', 'i3', 'alacritty']
+            },
+            '/home/arch/Documents': {
+                type: 'dir',
+                children: ['notes.txt', 'todo.md']
+            },
+            '/home/arch/Documents/notes.txt': {
+                type: 'file',
+                content: 'My Arch Linux Notes\n===================\n\n1. Remember to update system regularly: sudo pacman -Syu\n2. AUR helper: yay or paru\n3. Check wiki: wiki.archlinux.org\n\nKeep it simple, keep it Arch!'
+            },
+            '/home/arch/Documents/todo.md': {
+                type: 'file',
+                content: '# TODO List\n\n- [x] Install Arch Linux\n- [x] Configure i3wm\n- [ ] Setup development environment\n- [ ] Learn more about systemd\n- [ ] Contribute to AUR'
+            },
+            '/home/arch/Downloads': { type: 'dir', children: [] },
+            '/home/arch/Pictures': { type: 'dir', children: ['wallpaper.png', 'screenshot.png'] },
+            '/home/arch/Music': { type: 'dir', children: [] },
+            '/home/arch/Videos': { type: 'dir', children: [] },
+            '/home/arch/projects': {
+                type: 'dir',
+                children: ['hello.py', 'server.js', 'Makefile']
+            },
+            '/home/arch/projects/hello.py': {
+                type: 'file',
+                content: '#!/usr/bin/env python3\n\ndef main():\n    print("Hello from Arch Linux!")\n    print("BTW, I use Arch.")\n\nif __name__ == "__main__":\n    main()'
+            },
+            '/home/arch/projects/server.js': {
+                type: 'file',
+                content: 'const http = require(\'http\');\n\nconst server = http.createServer((req, res) => {\n    res.writeHead(200, {\'Content-Type\': \'text/plain\'});\n    res.end(\'Hello from Arch Linux Server!\\n\');\n});\n\nserver.listen(3000, () => {\n    console.log(\'Server running at http://localhost:3000/\');\n});'
+            },
+            '/home/arch/projects/Makefile': {
+                type: 'file',
+                content: 'CC=gcc\nCFLAGS=-Wall -Wextra -O2\n\nall: main\n\nmain: main.c\n\t$(CC) $(CFLAGS) -o main main.c\n\nclean:\n\trm -f main'
+            },
+            '/home/arch/README.md': {
+                type: 'file',
+                content: '# Welcome to Arch Linux Terminal Emulator\n\nThis is a simulated Arch Linux terminal running in your browser.\n\n## Available Commands\n\n- `ls` - list directory contents\n- `cd` - change directory\n- `pwd` - print working directory\n- `cat` - display file contents\n- `echo` - display text\n- `clear` - clear terminal\n- `neofetch` - system info\n- `pacman` - package manager\n- `help` - show all commands\n\n## Fun Fact\n\nBTW, I use Arch. 🐧'
+            },
+            '/etc': {
+                type: 'dir',
+                children: ['pacman.conf', 'fstab', 'hostname', 'hosts', 'passwd']
+            },
+            '/etc/hostname': {
+                type: 'file',
+                content: 'archlinux'
+            },
+            '/etc/hosts': {
+                type: 'file',
+                content: '127.0.0.1\tlocalhost\n::1\t\tlocalhost\n127.0.1.1\tarchlinux.localdomain\tarchlinux'
+            },
+            '/bin': { type: 'dir', children: ['bash', 'ls', 'cat', 'pwd', 'echo', 'grep', 'sed', 'awk'] },
+            '/usr': { type: 'dir', children: ['bin', 'lib', 'share', 'local'] },
+            '/tmp': { type: 'dir', children: [] },
+            '/var': { type: 'dir', children: ['log', 'cache', 'tmp'] },
+        };
+
+        // Terminal State
+        let currentPath = '/home/arch';
+        let commandHistory = [];
+        let historyIndex = -1;
+        const username = 'arch';
+        const hostname = 'archlinux';
+        let env = {
+            HOME: '/home/arch',
+            USER: 'arch',
+            SHELL: '/bin/bash',
+            PATH: '/usr/local/bin:/usr/bin:/bin',
+            TERM: 'xterm-256color',
+            EDITOR: 'vim'
+        };
+
+        // Installed packages
+        let installedPackages = [
+            { name: 'base', version: '3-1' },
+            { name: 'base-devel', version: '1-1' },
+            { name: 'bash', version: '5.2.026-2' },
+            { name: 'coreutils', version: '9.4-3' },
+            { name: 'filesystem', version: '2024.01.19-1' },
+            { name: 'gcc', version: '13.2.1-5' },
+            { name: 'git', version: '2.44.0-1' },
+            { name: 'linux', version: '6.7.6.arch1-1' },
+            { name: 'neovim', version: '0.9.5-4' },
+            { name: 'nodejs', version: '21.6.2-1' },
+            { name: 'pacman', version: '6.0.2-8' },
+            { name: 'python', version: '3.11.8-1' },
+            { name: 'vim', version: '9.1.0135-1' }
+        ];
+
+        // Available packages in repos
+        const availablePackages = {
+            'firefox': { version: '124.0-1', size: '78.5 MiB', desc: 'Standalone web browser from mozilla.org' },
+            'chromium': { version: '122.0.6261.94-1', size: '95.2 MiB', desc: 'A web browser built for speed, simplicity, and security' },
+            'htop': { version: '3.3.0-1', size: '0.3 MiB', desc: 'Interactive process viewer' },
+            'neofetch': { version: '7.1.0-2', size: '0.1 MiB', desc: 'A CLI system information tool' },
+            'discord': { version: '0.0.45-1', size: '120.3 MiB', desc: 'All-in-one voice and text chat' },
+            'spotify': { version: '1.2.31-1', size: '150.8 MiB', desc: 'A proprietary music streaming service' },
+            'vlc': { version: '3.0.20-4', size: '45.6 MiB', desc: 'Multi-platform MPEG, VCD/DVD, and DivX player' },
+            'docker': { version: '25.0.3-1', size: '52.1 MiB', desc: 'Pack, ship and run any application as a lightweight container' },
+            'code': { version: '1.87.0-1', size: '120.5 MiB', desc: 'The Open Source build of Visual Studio Code' },
+            'steam': { version: '1.0.0.79-1', size: '4.2 MiB', desc: 'Valve\'s digital software delivery system' },
+            'rust': { version: '1.76.0-1', size: '180.3 MiB', desc: 'Systems programming language' },
+            'go': { version: '1.22.0-1', size: '145.2 MiB', desc: 'Core compiler tools for the Go programming language' },
+            'nginx': { version: '1.24.0-2', size: '1.2 MiB', desc: 'Lightweight HTTP server and IMAP/POP3 proxy server' },
+            'postgresql': { version: '16.2-1', size: '25.8 MiB', desc: 'Sophisticated object-relational DBMS' },
+            'redis': { version: '7.2.4-1', size: '2.1 MiB', desc: 'An in-memory database' },
+            'zsh': { version: '5.9-4', size: '3.2 MiB', desc: 'A very advanced and programmable command interpreter' },
+            'tmux': { version: '3.4-1', size: '0.8 MiB', desc: 'Terminal multiplexer' },
+            'wget': { version: '1.21.4-1', size: '3.1 MiB', desc: 'Network utility to retrieve files from the Web' },
+            'curl': { version: '8.6.0-1', size: '4.5 MiB', desc: 'Command line tool for transferring data' },
+            'ripgrep': { version: '14.1.0-1', size: '2.8 MiB', desc: 'A search tool that combines ag with grep' },
+            'fzf': { version: '0.46.1-1', size: '1.5 MiB', desc: 'Command-line fuzzy finder' },
+            'bat': { version: '0.24.0-1', size: '2.3 MiB', desc: 'Cat clone with syntax highlighting' },
+            'exa': { version: '0.10.1-4', size: '0.8 MiB', desc: 'ls replacement' },
+            'btop': { version: '1.3.0-1', size: '2.1 MiB', desc: 'A monitor of resources' },
+            'gimp': { version: '2.10.36-3', size: '125.4 MiB', desc: 'GNU Image Manipulation Program' },
+            'blender': { version: '4.0.2-3', size: '320.5 MiB', desc: '3D graphics creation suite' },
+            'obs-studio': { version: '30.0.2-2', size: '85.2 MiB', desc: 'Free, open source streaming/recording software' }
+        };
+
+        const outputEl = document.getElementById('output');
+        const inputEl = document.getElementById('command-input');
+        const promptEl = document.getElementById('prompt');
+        const terminalBody = document.getElementById('terminal-body');
+        const terminalTitle = document.querySelector('.terminal-title');
+
+        function getPrompt() {
+            const displayPath = currentPath === '/home/arch' ? '~' : 
+                               currentPath.startsWith('/home/arch/') ? '~' + currentPath.slice(11) : currentPath;
+            return `<span class="prompt-user">${username}@${hostname}</span>:<span class="prompt-path">${displayPath}</span>$ `;
+        }
+
+        function updatePrompt() {
+            promptEl.innerHTML = getPrompt();
+            const displayPath = currentPath === '/home/arch' ? '~' : 
+                               currentPath.startsWith('/home/arch/') ? '~' + currentPath.slice(11) : currentPath;
+            terminalTitle.textContent = `${username}@${hostname}: ${displayPath}`;
+        }
+
+        function appendOutput(text, className = '') {
+            const line = document.createElement('div');
+            line.className = 'output-line' + (className ? ' ' + className : '');
+            line.innerHTML = text;
+            outputEl.appendChild(line);
+            scrollToBottom();
+        }
+
+        function appendRaw(text) {
+            const line = document.createElement('div');
+            line.className = 'output-line';
+            line.textContent = text;
+            outputEl.appendChild(line);
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+            terminalBody.scrollTop = terminalBody.scrollHeight;
+        }
+
+        function resolvePath(path) {
+            if (path.startsWith('~')) {
+                path = '/home/arch' + path.slice(1);
+            }
+            if (!path.startsWith('/')) {
+                path = currentPath + '/' + path;
+            }
+            // Normalize path
+            const parts = path.split('/').filter(p => p && p !== '.');
+            const stack = [];
+            for (const part of parts) {
+                if (part === '..') {
+                    stack.pop();
+                } else {
+                    stack.push(part);
+                }
+            }
+            return '/' + stack.join('/') || '/';
+        }
+
+        function getNode(path) {
+            return fileSystem[path];
+        }
+
+        // Commands
+        const commands = {
+            help: () => {
+                appendOutput(`
+<span class="info">Available Commands:</span>
+
+  <span class="success">Navigation:</span>
+    ls [path]        List directory contents
+    cd [path]        Change directory
+    pwd              Print working directory
+
+  <span class="success">File Operations:</span>
+    cat [file]       Display file contents
+    touch [file]     Create empty file
+    mkdir [dir]      Create directory
+    rm [file]        Remove file
+
+  <span class="success">Text:</span>
+    echo [text]      Display text
+    grep [pattern]   Search pattern (simulated)
+
+  <span class="success">System:</span>
+    neofetch         Display system info
+    uname [-a]       System information
+    whoami           Current user
+    hostname         Show hostname
+    date             Current date/time
+    uptime           System uptime
+    free             Memory usage
+    df               Disk usage
+    ps               Process list
+    top              System monitor
+
+  <span class="success">Package Manager:</span>
+    pacman -Syu      Update system
+    pacman -S [pkg]  Install package
+    pacman -R [pkg]  Remove package
+    pacman -Ss [q]   Search packages
+    pacman -Qs [q]   Search installed
+    pacman -Q        List installed
+
+  <span class="success">Utilities:</span>
+    clear            Clear terminal
+    history          Command history
+    env              Environment variables
+    export VAR=val   Set environment variable
+    alias            Show aliases
+    man [cmd]        Manual pages
+    which [cmd]      Locate command
+    cowsay [text]    ASCII cow
+
+  <span class="success">Other:</span>
+    exit             Exit terminal
+    reboot           Reboot (refresh)
+    btw              I use Arch btw
+
+  <span class="warning">Installable Packages (pacman -S name):</span>
+    htop, btop       System monitors
+    firefox, chromium Web browsers
+    docker           Container platform
+    wget, curl       Download tools
+    nginx            Web server
+    code             VS Code editor
+    tmux             Terminal multiplexer
+    zsh              Z shell
+    bat, exa, ripgrep Modern CLI tools
+    rust, go         Programming languages
+    discord, spotify Apps
+    ...and more! Try: pacman -Ss <query>
+`);
+            },
+
+            ls: (args) => {
+                const flags = args.filter(a => a.startsWith('-')).join('');
+                const target = args.find(a => !a.startsWith('-')) || '.';
+                const path = resolvePath(target);
+                const node = getNode(path);
+                
+                if (!node) {
+                    appendOutput(`ls: cannot access '${target}': No such file or directory`, 'error');
+                    return;
+                }
+                if (node.type !== 'dir') {
+                    appendOutput(target);
+                    return;
+                }
+
+                const showHidden = flags.includes('a');
+                const longFormat = flags.includes('l');
+                let items = [...node.children];
+                
+                if (showHidden) {
+                    items = ['.', '..', ...items];
+                } else {
+                    items = items.filter(i => !i.startsWith('.'));
+                }
+
+                if (longFormat) {
+                    appendOutput('total ' + items.length);
+                    items.forEach(item => {
+                        const itemPath = path === '/' ? '/' + item : path + '/' + item;
+                        const itemNode = getNode(itemPath);
+                        const isDir = item === '.' || item === '..' || (itemNode && itemNode.type === 'dir');
+                        const perms = isDir ? 'drwxr-xr-x' : '-rw-r--r--';
+                        const size = itemNode?.content?.length || 4096;
+                        const date = 'Mar 15 12:00';
+                        const colorClass = isDir ? 'directory' : item.endsWith('.py') || item.endsWith('.sh') ? 'executable' : 'file';
+                        appendOutput(`${perms}  1 arch arch ${String(size).padStart(5)} ${date} <span class="${colorClass}">${item}</span>`);
+                    });
+                } else {
+                    let output = items.map(item => {
+                        const itemPath = path === '/' ? '/' + item : path + '/' + item;
+                        const itemNode = getNode(itemPath);
+                        const isDir = item === '.' || item === '..' || (itemNode && itemNode.type === 'dir');
+                        const colorClass = isDir ? 'directory' : item.endsWith('.py') || item.endsWith('.sh') ? 'executable' : 'file';
+                        return `<span class="${colorClass}">${item}</span>`;
+                    }).join('  ');
+                    appendOutput(output);
+                }
+            },
+
+            cd: (args) => {
+                const target = args[0] || '~';
+                const path = resolvePath(target);
+                const node = getNode(path);
+                
+                if (!node) {
+                    appendOutput(`cd: ${target}: No such file or directory`, 'error');
+                    return;
+                }
+                if (node.type !== 'dir') {
+                    appendOutput(`cd: ${target}: Not a directory`, 'error');
+                    return;
+                }
+                currentPath = path;
+                updatePrompt();
+            },
+
+            pwd: () => {
+                appendOutput(currentPath);
+            },
+
+            cat: (args) => {
+                if (!args.length) {
+                    appendOutput('cat: missing operand', 'error');
+                    return;
+                }
+                const path = resolvePath(args[0]);
+                const node = getNode(path);
+                
+                if (!node) {
+                    appendOutput(`cat: ${args[0]}: No such file or directory`, 'error');
+                    return;
+                }
+                if (node.type === 'dir') {
+                    appendOutput(`cat: ${args[0]}: Is a directory`, 'error');
+                    return;
+                }
+                appendRaw(node.content);
+            },
+
+            echo: (args) => {
+                let text = args.join(' ');
+                // Handle environment variables
+                text = text.replace(/\$(\w+)/g, (match, varName) => env[varName] || '');
+                text = text.replace(/^["']|["']$/g, '');
+                appendOutput(text);
+            },
+
+            clear: () => {
+                outputEl.innerHTML = '';
+            },
+
+            neofetch: () => {
+                const arch = `
+<span class="ascii-art">                   -\`                    </span> <span class="prompt-user">arch@archlinux</span>
+<span class="ascii-art">                  .o+\`                   </span> ----------------
+<span class="ascii-art">                 \`ooo/                   </span> <span class="info">OS:</span> Arch Linux x86_64
+<span class="ascii-art">                \`+oooo:                  </span> <span class="info">Host:</span> Browser Virtual Machine
+<span class="ascii-art">               \`+oooooo:                 </span> <span class="info">Kernel:</span> 6.7.0-arch1-1
+<span class="ascii-art">               -+oooooo+:                </span> <span class="info">Uptime:</span> ${Math.floor(Math.random() * 24)} hours, ${Math.floor(Math.random() * 60)} mins
+<span class="ascii-art">             \`/:-:++oooo+:               </span> <span class="info">Packages:</span> 847 (pacman)
+<span class="ascii-art">            \`/++++/+++++++:              </span> <span class="info">Shell:</span> bash 5.2.26
+<span class="ascii-art">           \`/++++++++++++++:             </span> <span class="info">Resolution:</span> ${window.innerWidth}x${window.innerHeight}
+<span class="ascii-art">          \`/+++ooooooooooooo/\`           </span> <span class="info">DE:</span> Web Browser
+<span class="ascii-art">         ./ooosssso++osssssso+\`          </span> <span class="info">WM:</span> HTML5/CSS3
+<span class="ascii-art">        .oossssso-\`\`\`\`/ossssss+\`         </span> <span class="info">Theme:</span> Adwaita [GTK3]
+<span class="ascii-art">       -osssssso.      :ssssssso.        </span> <span class="info">Terminal:</span> web-terminal
+<span class="ascii-art">      :osssssss/        osssso+++.       </span> <span class="info">CPU:</span> JavaScript V8 @ ${navigator.hardwareConcurrency || 8} cores
+<span class="ascii-art">     /ossssssss/        +ssssooo/-       </span> <span class="info">Memory:</span> ${Math.floor(Math.random() * 4000 + 2000)}MiB / 16384MiB
+<span class="ascii-art">   \`/ossssso+/:-        -:/+osssso+-     </span>
+<span class="ascii-art">  \`+sso+:-\`                 \`.-/+oso:    </span>
+<span class="ascii-art"> \`++:.                           \`-/+/   </span>
+<span class="ascii-art"> .\`                                 \`/   </span>`;
+                appendOutput(arch);
+            },
+
+            whoami: () => appendOutput(username),
+            hostname: () => appendOutput(hostname),
+
+            uname: (args) => {
+                if (args.includes('-a')) {
+                    appendOutput('Linux archlinux 6.7.0-arch1-1 #1 SMP PREEMPT_DYNAMIC x86_64 GNU/Linux');
+                } else {
+                    appendOutput('Linux');
+                }
+            },
+
+            date: () => {
+                appendOutput(new Date().toString());
+            },
+
+            uptime: () => {
+                const hours = Math.floor(Math.random() * 100);
+                const mins = Math.floor(Math.random() * 60);
+                appendOutput(` ${new Date().toLocaleTimeString()} up ${hours}:${mins}, 1 user, load average: 0.52, 0.58, 0.59`);
+            },
+
+            free: () => {
+                appendOutput(`              total        used        free      shared  buff/cache   available
+Mem:       16384000     4521348     8234652      524288     3628000    11862652
+Swap:       8192000           0     8192000`);
+            },
+
+            df: () => {
+                appendOutput(`Filesystem     1K-blocks      Used Available Use% Mounted on
+dev              8173824         0   8173824   0% /dev
+run              8192000      1248   8190752   1% /run
+/dev/sda1      244140625  48576432 195564193  20% /
+tmpfs            8192000    524288   7667712   7% /dev/shm
+/dev/sda2         524288    115248    409040  22% /boot`);
+            },
+
+            ps: () => {
+                appendOutput(`  PID TTY          TIME CMD
+    1 ?        00:00:02 systemd
+  234 ?        00:00:00 bash
+  567 pts/0    00:00:00 node
+  890 pts/0    00:00:01 vim
+ 1234 pts/0    00:00:00 ps`);
+            },
+
+            top: () => {
+                appendOutput(`top - ${new Date().toLocaleTimeString()} up 4:32, 1 user, load average: 0.52, 0.58, 0.59
+Tasks: 142 total,   1 running, 141 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  5.2 us,  1.3 sy,  0.0 ni, 93.2 id,  0.3 wa,  0.0 hi,  0.0 si
+MiB Mem:  16384.0 total,   8234.7 free,   4521.3 used,   3628.0 buff/cache
+MiB Swap:  8192.0 total,   8192.0 free,      0.0 used.  11862.7 avail Mem
+
+  <span class="success">PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND</span>
+    1 root      20   0  168932  13456   8832 S   0.0   0.1   0:02.34 systemd
+  567 arch      20   0  723456  45678  12345 S   2.3   0.3   0:15.67 node
+  890 arch      20   0   45678  23456   4567 S   0.7   0.1   0:05.23 vim
+
+<span class="info">Press 'q' to quit (just type any command)</span>`);
+            },
+
+            pacman: (args) => {
+                if (args[0] === '-Syu') {
+                    inputEl.disabled = true;
+                    appendOutput(`<span class="info">::</span> Synchronizing package databases...`);
+                    
+                    const repos = ['core', 'extra', 'community'];
+                    let delay = 300;
+                    
+                    repos.forEach((repo, idx) => {
+                        setTimeout(() => {
+                            const size = (Math.random() * 5 + 0.5).toFixed(1);
+                            const speed = (Math.random() * 3 + 0.5).toFixed(2);
+                            appendOutput(` ${repo.padEnd(20)} ${size} MiB  ${speed} MiB/s 00:0${idx} [######################] 100%`);
+                        }, delay * (idx + 1));
+                    });
+                    
+                    setTimeout(() => {
+                        appendOutput(`<span class="info">::</span> Starting full system upgrade...`);
+                        appendOutput(` there is nothing to do`, 'success');
+                        inputEl.disabled = false;
+                        inputEl.focus();
+                    }, delay * 4);
+                    
+                } else if (args[0] === '-S' && args[1]) {
+                    const pkgName = args[1];
+                    
+                    // Check if already installed
+                    if (installedPackages.find(p => p.name === pkgName)) {
+                        appendOutput(`<span class="warning">warning:</span> ${pkgName} is already installed -- reinstalling`);
+                    }
+                    
+                    // Get package info
+                    const pkg = availablePackages[pkgName] || { 
+                        version: '1.0.0-1', 
+                        size: (Math.random() * 50 + 1).toFixed(1) + ' MiB',
+                        desc: 'A package from the Arch repositories'
+                    };
+                    
+                    inputEl.disabled = true;
+                    
+                    appendOutput(`<span class="info">::</span> Resolving dependencies...`);
+                    
+                    setTimeout(() => {
+                        appendOutput(`looking for conflicting packages...
+
+<span class="success">Packages (1)</span> ${pkgName}-${pkg.version}
+
+Total Download Size:   ${pkg.size}
+Total Installed Size:  ${pkg.size}
+
+<span class="info">::</span> Proceed with installation? [Y/n]`);
+                        
+                        setTimeout(() => {
+                            appendOutput(`<span class="info">::</span> Retrieving packages...`);
+                            
+                            // Animate download
+                            let progress = 0;
+                            const progressBar = document.createElement('div');
+                            progressBar.className = 'output-line';
+                            outputEl.appendChild(progressBar);
+                            
+                            const downloadInterval = setInterval(() => {
+                                progress += Math.random() * 15 + 5;
+                                if (progress >= 100) {
+                                    progress = 100;
+                                    clearInterval(downloadInterval);
+                                    
+                                    const hashes = '#'.repeat(22);
+                                    progressBar.innerHTML = ` ${pkgName}-${pkg.version}   ${pkg.size}  [${hashes}] 100%`;
+                                    
+                                    setTimeout(() => {
+                                        appendOutput(`<span class="info">(1/1)</span> checking keys in keyring              [######################] 100%`);
+                                        appendOutput(`<span class="info">(1/1)</span> checking package integrity            [######################] 100%`);
+                                        appendOutput(`<span class="info">(1/1)</span> loading package files                 [######################] 100%`);
+                                        appendOutput(`<span class="info">(1/1)</span> checking for file conflicts           [######################] 100%`);
+                                        appendOutput(`<span class="info">(1/1)</span> checking available disk space         [######################] 100%`);
+                                        
+                                        setTimeout(() => {
+                                            appendOutput(`<span class="info">::</span> Processing package changes...`);
+                                            appendOutput(`<span class="success">(1/1) installing ${pkgName}</span>                    [######################] 100%`);
+                                            
+                                            // Actually add to installed packages
+                                            if (!installedPackages.find(p => p.name === pkgName)) {
+                                                installedPackages.push({ name: pkgName, version: pkg.version });
+                                                installedPackages.sort((a, b) => a.name.localeCompare(b.name));
+                                            }
+                                            
+                                            appendOutput(`<span class="success">:: ${pkgName} has been installed successfully!</span>`);
+                                            inputEl.disabled = false;
+                                            inputEl.focus();
+                                            scrollToBottom();
+                                        }, 400);
+                                    }, 300);
+                                } else {
+                                    const filled = Math.floor(progress / 100 * 22);
+                                    const empty = 22 - filled;
+                                    const hashes = '#'.repeat(filled) + '-'.repeat(empty);
+                                    progressBar.innerHTML = ` ${pkgName}-${pkg.version}   ${pkg.size}  [${hashes}] ${Math.floor(progress)}%`;
+                                }
+                                scrollToBottom();
+                            }, 100);
+                            
+                        }, 500);
+                    }, 400);
+                    
+                } else if (args[0] === '-Ss' && args[1]) {
+                    const query = args[1].toLowerCase();
+                    let found = false;
+                    
+                    Object.entries(availablePackages).forEach(([name, pkg]) => {
+                        if (name.includes(query) || pkg.desc.toLowerCase().includes(query)) {
+                            appendOutput(`<span class="info">extra/${name}</span> ${pkg.version}
+    ${pkg.desc}`);
+                            found = true;
+                        }
+                    });
+                    
+                    if (!found) {
+                        appendOutput(`<span class="info">extra/${query}</span> 1.0.0-1
+    A package matching your search
+<span class="info">community/${query}-git</span> latest-1
+    Git version of ${query}`);
+                    }
+                    
+                } else if (args[0] === '-Q') {
+                    installedPackages.forEach(pkg => {
+                        appendOutput(`${pkg.name} ${pkg.version}`);
+                    });
+                    
+                } else if (args[0] === '-Qs' && args[1]) {
+                    const query = args[1].toLowerCase();
+                    const matches = installedPackages.filter(p => p.name.includes(query));
+                    if (matches.length > 0) {
+                        matches.forEach(pkg => {
+                            appendOutput(`<span class="info">local/${pkg.name}</span> ${pkg.version}`);
+                        });
+                    } else {
+                        appendOutput(`error: no package found`, 'error');
+                    }
+                    
+                } else if (args[0] === '-R' && args[1]) {
+                    const pkgName = args[1];
+                    const pkgIndex = installedPackages.findIndex(p => p.name === pkgName);
+                    
+                    if (pkgIndex === -1) {
+                        appendOutput(`<span class="error">error:</span> target not found: ${pkgName}`, 'error');
+                    } else {
+                        inputEl.disabled = true;
+                        appendOutput(`<span class="info">::</span> Checking dependencies...`);
+                        
+                        setTimeout(() => {
+                            appendOutput(`
+<span class="warning">Packages (1)</span> ${pkgName}-${installedPackages[pkgIndex].version}
+
+Total Removed Size:  ${(Math.random() * 50 + 1).toFixed(1)} MiB
+
+<span class="info">::</span> Do you want to remove these packages? [Y/n]`);
+                            
+                            setTimeout(() => {
+                                appendOutput(`<span class="success">(1/1) removing ${pkgName}</span>                    [######################] 100%`);
+                                installedPackages.splice(pkgIndex, 1);
+                                appendOutput(`<span class="success">:: ${pkgName} has been removed successfully!</span>`);
+                                inputEl.disabled = false;
+                                inputEl.focus();
+                            }, 500);
+                        }, 400);
+                    }
+                    
+                } else {
+                    appendOutput(`usage:  pacman <operation> [...]
+operations:
+    pacman -S  <package>   install package
+    pacman -R  <package>   remove package  
+    pacman -Ss <query>     search packages
+    pacman -Qs <query>     search installed packages
+    pacman -Syu            upgrade system
+    pacman -Q              list installed`, 'warning');
+                }
+            },
+
+            mkdir: (args) => {
+                if (!args[0]) {
+                    appendOutput('mkdir: missing operand', 'error');
+                    return;
+                }
+                const path = resolvePath(args[0]);
+                if (fileSystem[path]) {
+                    appendOutput(`mkdir: cannot create directory '${args[0]}': File exists`, 'error');
+                    return;
+                }
+                fileSystem[path] = { type: 'dir', children: [] };
+                const parent = path.substring(0, path.lastIndexOf('/')) || '/';
+                if (fileSystem[parent]) {
+                    fileSystem[parent].children.push(args[0]);
+                }
+            },
+
+            touch: (args) => {
+                if (!args[0]) {
+                    appendOutput('touch: missing operand', 'error');
+                    return;
+                }
+                const path = resolvePath(args[0]);
+                if (!fileSystem[path]) {
+                    fileSystem[path] = { type: 'file', content: '' };
+                    const parent = path.substring(0, path.lastIndexOf('/')) || '/';
+                    if (fileSystem[parent]) {
+                        fileSystem[parent].children.push(args[0]);
+                    }
+                }
+            },
+
+            rm: (args) => {
+                if (!args[0]) {
+                    appendOutput('rm: missing operand', 'error');
+                    return;
+                }
+                const path = resolvePath(args[0]);
+                if (!fileSystem[path]) {
+                    appendOutput(`rm: cannot remove '${args[0]}': No such file or directory`, 'error');
+                    return;
+                }
+                delete fileSystem[path];
+            },
+
+            history: () => {
+                commandHistory.forEach((cmd, i) => {
+                    appendOutput(`  ${i + 1}  ${cmd}`);
+                });
+            },
+
+            env: () => {
+                Object.entries(env).forEach(([key, value]) => {
+                    appendOutput(`${key}=${value}`);
+                });
+            },
+
+            export: (args) => {
+                const match = args.join(' ').match(/^(\w+)=(.*)$/);
+                if (match) {
+                    env[match[1]] = match[2].replace(/^["']|["']$/g, '');
+                }
+            },
+
+            alias: () => {
+                appendOutput(`alias ls='ls --color=auto'
+alias grep='grep --color=auto'
+alias ll='ls -la'
+alias la='ls -a'
+alias ..='cd ..'
+alias ...='cd ../..'`);
+            },
+
+            which: (args) => {
+                if (!args[0]) {
+                    appendOutput('which: missing argument', 'error');
+                    return;
+                }
+                const cmds = ['ls', 'cat', 'pwd', 'echo', 'grep', 'bash', 'vim', 'pacman', 'git'];
+                if (cmds.includes(args[0])) {
+                    appendOutput(`/usr/bin/${args[0]}`);
+                } else if (commands[args[0]]) {
+                    appendOutput(`${args[0]}: shell built-in command`);
+                } else {
+                    appendOutput(`${args[0]} not found`, 'error');
+                }
+            },
+
+            man: (args) => {
+                if (!args[0]) {
+                    appendOutput('What manual page do you want?', 'warning');
+                    return;
+                }
+                appendOutput(`<span class="info">${args[0].toUpperCase()}(1)</span>                   User Commands                   <span class="info">${args[0].toUpperCase()}(1)</span>
+
+<span class="success">NAME</span>
+       ${args[0]} - ${args[0]} command
+
+<span class="success">SYNOPSIS</span>
+       ${args[0]} [OPTION]... [FILE]...
+
+<span class="success">DESCRIPTION</span>
+       This is the manual page for ${args[0]}.
+       In this simulated terminal, ${args[0]} provides basic functionality.
+
+<span class="success">AUTHOR</span>
+       Written for Arch Linux Terminal Emulator.
+
+<span class="success">SEE ALSO</span>
+       Full documentation: https://wiki.archlinux.org
+
+<span class="info">Arch Linux</span>                    March 2024                    <span class="info">${args[0].toUpperCase()}(1)</span>`);
+            },
+
+            cowsay: (args) => {
+                const text = args.join(' ') || 'Moo!';
+                const border = '-'.repeat(text.length + 2);
+                appendOutput(` ${border}
+< ${text} >
+ ${border}
+        \\   ^__^
+         \\  (oo)\\_______
+            (__)\\       )\\/\\
+                ||----w |
+                ||     ||`);
+            },
+
+            btw: () => {
+                appendOutput(`
+<span class="info">╔══════════════════════════════════════════╗
+║                                          ║
+║       BTW, I USE ARCH LINUX! 🐧          ║
+║                                          ║
+╚══════════════════════════════════════════╝</span>`);
+            },
+
+            exit: () => {
+                appendOutput('logout', 'warning');
+                setTimeout(() => {
+                    document.body.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:100vh;color:#1793d1;font-family:monospace;font-size:24px;">Session ended. Refresh to restart.</div>';
+                }, 500);
+            },
+
+            reboot: () => {
+                appendOutput('Rebooting system...', 'warning');
+                setTimeout(() => location.reload(), 1000);
+            },
+
+            grep: (args) => {
+                if (args.length < 1) {
+                    appendOutput('Usage: grep PATTERN [FILE]', 'warning');
+                    return;
+                }
+                appendOutput(`grep: simulated search for '${args[0]}'`, 'info');
+            },
+
+            vim: (args) => {
+                appendOutput(`<span class="info">VIM - Vi IMproved</span>
+
+ Type :q to exit (in the real vim!)
+ This is a terminal emulator - vim is simulated.
+ 
+ Try: cat ${args[0] || 'filename'} to view files`);
+            },
+
+            nano: (args) => {
+                appendOutput(`<span class="info">GNU nano</span> - simulated
+ Use cat to view files in this terminal emulator.`);
+            },
+
+            git: (args) => {
+                if (!args.length) {
+                    appendOutput(`usage: git <command>
+
+These are common Git commands:
+
+   clone     Clone a repository
+   init      Create an empty Git repository
+   add       Add file contents to the index
+   commit    Record changes to the repository
+   push      Update remote refs
+   pull      Fetch from and integrate with another repository
+   status    Show the working tree status`, 'info');
+                } else if (args[0] === 'status') {
+                    appendOutput(`On branch main
+Your branch is up to date with 'origin/main'.
+
+nothing to commit, working tree clean`, 'success');
+                } else {
+                    appendOutput(`git: '${args[0]}' simulated`, 'info');
+                }
+            },
+
+            sudo: (args) => {
+                if (!args.length) {
+                    appendOutput('usage: sudo <command>', 'warning');
+                    return;
+                }
+                appendOutput(`[sudo] password for ${username}: `, 'warning');
+                setTimeout(() => {
+                    executeCommand(args.join(' '));
+                }, 500);
+            },
+
+            sl: () => {
+                appendOutput(`<span class="warning">
+      ====        ________                ___________
+  _D _|  |_______/        \\__I_I_____===__|_________|
+   |(_)---  |   H\\________/ |   |        =|___ ___|  
+   /     |  |   H  |  |     |   |         ||_| |_||  
+  |      |  |   H  |__--------------------| [___] |  
+  | ________|___H__/__|_____/[][]~\\_______|       |  
+  |/ |   |-----------I_____I [][] []  D   |=======|__
+__/ =| o |=-~~\\  /~~\\  /~~\\  /~~\\ ____Y___________|__
+ |/-=|___|=    ||    ||    ||    |_____/~\\___/        
+  \\_/      \\O=====O=====O=====O_/      \\_/            
+</span>
+<span class="info">You have been hit by a train! Install sl: pacman -S sl</span>`);
+            },
+        };
+
+        // Package commands - commands that become available after installing packages
+        const packageCommands = {
+            htop: () => {
+                appendOutput(`<span class="success">htop 3.3.0</span> - Interactive Process Viewer
+
+  <span class="info">CPU[||||||||||||||||      52.3%]</span>   Tasks: <span class="success">142</span>, <span class="warning">523</span> thr; <span class="success">1</span> running
+  <span class="info">Mem[||||||||||||         4.2G/16G]</span>   Load average: 0.52 0.58 0.59
+  <span class="info">Swp[                     0K/8G]</span>   Uptime: ${Math.floor(Math.random()*10)}:${String(Math.floor(Math.random()*60)).padStart(2,'0')}:${String(Math.floor(Math.random()*60)).padStart(2,'0')}
+
+  <span class="directory">  PID USER      PRI  NI  VIRT   RES   SHR S CPU%▽MEM%   TIME+  Command</span>
+  <span class="success"> 1842 arch       20   0  723M  125M  45M S  8.2  0.8  1:23.45 /usr/bin/node</span>
+   567 arch       20   0  456M   89M  32M S  3.1  0.5  0:45.12 /usr/bin/vim
+  1024 arch       20   0  1.2G  234M  67M S  2.4  1.4  2:34.56 /usr/bin/firefox
+   890 root       20   0  168M   13M   8M S  0.3  0.1  0:02.34 /usr/lib/systemd
+     1 root       20   0   24M    5M   3M S  0.0  0.0  0:01.23 /sbin/init
+
+<span class="info">Press q to quit, F1 for help (simulated)</span>`);
+            },
+
+            btop: () => {
+                appendOutput(`<span class="info">btop++ 1.3.0</span>
+┌─ <span class="success">CPU</span> ─────────────────────────────────────────────────────┐
+│ <span class="warning">████████████████████░░░░░░░░░░░░░░░░░░░░</span> 52% @ 3.4GHz  │
+│ Core 0: <span class="success">45%</span>  Core 1: <span class="success">58%</span>  Core 2: <span class="warning">72%</span>  Core 3: <span class="success">33%</span>      │
+└──────────────────────────────────────────────────────────┘
+┌─ <span class="success">MEMORY</span> ────────────────────────────────────────────────────┐
+│ <span class="info">████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span> 4.2G / 16G     │
+│ Swap: 0B / 8G                                            │
+└──────────────────────────────────────────────────────────┘
+┌─ <span class="success">NETWORK</span> ─────────────────┬─ <span class="success">DISK</span> ────────────────────────┐
+│ ↓ 1.2 MiB/s  ↑ 234 KiB/s │ /dev/sda1: 48G / 240G (20%)  │
+└───────────────────────────┴──────────────────────────────┘`);
+            },
+
+            firefox: () => {
+                appendOutput(`<span class="info">Mozilla Firefox 124.0</span>
+Launching Firefox...
+<span class="success">Firefox is running!</span> (simulated - this is a terminal emulator)
+
+In a real system, this would open the Firefox browser.`);
+            },
+
+            chromium: () => {
+                appendOutput(`<span class="info">Chromium 122.0.6261.94</span>
+Launching Chromium browser...
+<span class="success">Chromium is running!</span> (simulated)
+
+Opening: about:blank`);
+            },
+
+            docker: (args) => {
+                if (!args.length) {
+                    appendOutput(`<span class="info">Docker version 25.0.3, build 4debf41</span>
+
+Usage:  docker [OPTIONS] COMMAND
+
+Common Commands:
+  run         Create and run a new container
+  ps          List containers
+  images      List images
+  pull        Download an image
+  build       Build an image from a Dockerfile
+  stop        Stop running containers
+
+Run 'docker COMMAND --help' for more information.`);
+                } else if (args[0] === 'ps') {
+                    appendOutput(`CONTAINER ID   IMAGE          COMMAND       CREATED        STATUS        PORTS     NAMES
+a1b2c3d4e5f6   nginx:latest   "nginx -g"    2 hours ago    Up 2 hours    80/tcp    webserver
+f6e5d4c3b2a1   redis:alpine   "redis-srv"   5 hours ago    Up 5 hours    6379/tcp  cache`);
+                } else if (args[0] === 'images') {
+                    appendOutput(`REPOSITORY   TAG       IMAGE ID       CREATED        SIZE
+nginx        latest    a1b2c3d4e5f6   2 weeks ago    142MB
+redis        alpine    b2c3d4e5f6a1   3 weeks ago    32MB
+node         20        c3d4e5f6a1b2   1 month ago    1.1GB`);
+                } else {
+                    appendOutput(`<span class="success">docker ${args.join(' ')}</span> - command simulated`);
+                }
+            },
+
+            wget: (args) => {
+                if (!args.length) {
+                    appendOutput('wget: missing URL', 'error');
+                    return;
+                }
+                const url = args[0];
+                appendOutput(`--${new Date().toISOString()}--  ${url}
+Resolving ${url.replace(/https?:\/\//, '').split('/')[0]}... <span class="success">done</span>
+Connecting to ${url.replace(/https?:\/\//, '').split('/')[0]}:443... <span class="success">connected</span>
+HTTP request sent, awaiting response... <span class="success">200 OK</span>
+Length: ${Math.floor(Math.random() * 50000 + 1000)} (${(Math.random() * 50 + 1).toFixed(1)}K) [text/html]
+Saving to: 'index.html'
+
+index.html          100%[===================>]  ${(Math.random() * 50 + 1).toFixed(1)}K  --.-KB/s    in 0.1s
+
+${new Date().toISOString()} - 'index.html' saved`);
+            },
+
+            curl: (args) => {
+                if (!args.length) {
+                    appendOutput('curl: try \'curl --help\' for more information', 'error');
+                    return;
+                }
+                if (args[0] === '--help' || args[0] === '-h') {
+                    appendOutput(`Usage: curl [options...] <url>
+ -o, --output <file>  Write to file
+ -O, --remote-name    Use remote filename
+ -L, --location       Follow redirects
+ -s, --silent         Silent mode
+ -v, --verbose        Verbose output`);
+                } else {
+                    const url = args.find(a => !a.startsWith('-')) || 'http://example.com';
+                    appendOutput(`<!DOCTYPE html>
+<html>
+<head><title>Example</title></head>
+<body>
+<h1>Example Response</h1>
+<p>Response from: ${url}</p>
+<p>Status: 200 OK</p>
+</body>
+</html>`);
+                }
+            },
+
+            nginx: (args) => {
+                if (args[0] === '-v') {
+                    appendOutput('nginx version: nginx/1.24.0');
+                } else if (args[0] === '-t') {
+                    appendOutput(`nginx: the configuration file /etc/nginx/nginx.conf syntax is <span class="success">ok</span>
+nginx: configuration file /etc/nginx/nginx.conf test is <span class="success">successful</span>`);
+                } else {
+                    appendOutput(`<span class="info">nginx 1.24.0</span>
+Usage: nginx [-?hvVtTq] [-s signal] [-p prefix] [-c filename]
+
+Options:
+  -v           : show version
+  -t           : test configuration
+  -s signal    : send signal (stop, quit, reload)
+
+<span class="success">nginx is ready to serve</span> (simulated)`);
+                }
+            },
+
+            code: (args) => {
+                const file = args[0] || '.';
+                appendOutput(`<span class="info">Visual Studio Code 1.87.0</span>
+Opening '${file}' in VS Code...
+<span class="success">VS Code launched!</span> (simulated - this is a terminal emulator)`);
+            },
+
+            vlc: (args) => {
+                appendOutput(`<span class="info">VLC media player 3.0.20 Vetinari</span>
+${args[0] ? `Opening: ${args[0]}` : 'No file specified'}
+<span class="success">VLC is running!</span> (simulated)`);
+            },
+
+            discord: () => {
+                appendOutput(`<span class="info">Discord 0.0.45</span>
+Starting Discord...
+<span class="success">Discord is running!</span> (simulated)
+Connecting to gateway.discord.gg...`);
+            },
+
+            spotify: () => {
+                appendOutput(`<span class="info">Spotify 1.2.31</span>
+Launching Spotify...
+<span class="success">♪ Now Playing:</span> Arch Linux Theme Song
+<span class="info">Artist:</span> The Terminal Band
+(simulated - this is a terminal emulator)`);
+            },
+
+            steam: () => {
+                appendOutput(`<span class="info">Steam Client</span>
+Initializing Steam...
+Connecting to Steam servers...
+<span class="success">Steam is running!</span>
+Library: 42 games installed (simulated)`);
+            },
+
+            gimp: () => {
+                appendOutput(`<span class="info">GNU Image Manipulation Program 2.10.36</span>
+Starting GIMP...
+Loading brushes... <span class="success">done</span>
+Loading patterns... <span class="success">done</span>
+Loading gradients... <span class="success">done</span>
+<span class="success">GIMP is ready!</span> (simulated)`);
+            },
+
+            blender: () => {
+                appendOutput(`<span class="info">Blender 4.0.2</span>
+Loading Blender...
+Initializing OpenGL... <span class="success">done</span>
+<span class="success">Blender started!</span> (simulated)
+Read prefs: /home/arch/.config/blender/4.0/config/userpref.blend`);
+            },
+
+            'obs-studio': () => {
+                appendOutput(`<span class="info">OBS Studio 30.0.2</span>
+Starting OBS...
+Loading modules... <span class="success">done</span>
+<span class="success">OBS is ready to stream/record!</span> (simulated)`);
+            },
+            
+            obs: () => {
+                packageCommands['obs-studio']();
+            },
+
+            tmux: (args) => {
+                if (!args.length || args[0] === 'new') {
+                    appendOutput(`<span class="info">tmux 3.4</span>
+[Creating new session]
+<span class="success">Session created!</span>
+
+┌──────────────────────────────────────────────────────────────┐
+│ <span class="prompt-user">arch@archlinux</span>:<span class="prompt-path">~</span>$                                          │
+│                                                              │
+│                                                              │
+│                                                              │
+├──────────────────────────────────────────────────────────────┤
+│ [0] 0:bash*                                                  │
+└──────────────────────────────────────────────────────────────┘
+(simulated - use normal terminal commands)`);
+                } else if (args[0] === 'ls') {
+                    appendOutput(`0: 1 windows (created ${new Date().toLocaleString()}) (attached)`);
+                } else {
+                    appendOutput(`tmux: ${args.join(' ')} (simulated)`);
+                }
+            },
+
+            zsh: () => {
+                appendOutput(`<span class="info">zsh 5.9</span>
+Switching to zsh shell...
+<span class="success">Welcome to Zsh!</span>
+
+Note: This terminal emulator simulates bash. 
+Zsh would provide additional features like better autocompletion.`);
+            },
+
+            fzf: () => {
+                appendOutput(`<span class="info">fzf 0.46.1</span>
+>
+  .bashrc
+  Documents/
+  Downloads/
+  projects/
+  README.md
+  
+<span class="info">5/5 (use arrow keys, Enter to select)</span>
+(simulated - type file paths directly)`);
+            },
+
+            ripgrep: (args) => {
+                const pattern = args[0] || 'pattern';
+                appendOutput(`<span class="info">ripgrep 14.1.0</span>
+Searching for '${pattern}'...
+
+<span class="success">README.md</span>:5:Type <span class="warning">${pattern}</span> for available commands
+<span class="success">Documents/notes.txt</span>:3:Remember to check ${pattern}
+<span class="success">.bashrc</span>:8:export ${pattern}=value
+
+<span class="info">3 matches found</span>`);
+            },
+
+            rg: (args) => {
+                packageCommands.ripgrep(args);
+            },
+
+            bat: (args) => {
+                if (!args.length) {
+                    appendOutput('bat: missing file operand', 'error');
+                    return;
+                }
+                const path = resolvePath(args[0]);
+                const node = getNode(path);
+                if (!node) {
+                    appendOutput(`bat: '${args[0]}': No such file or directory`, 'error');
+                    return;
+                }
+                if (node.type === 'dir') {
+                    appendOutput(`bat: '${args[0]}': Is a directory`, 'error');
+                    return;
+                }
+                appendOutput(`<span class="info">───────┬────────────────────────────────────────────────────</span>
+<span class="info">       │ File: ${args[0]}</span>
+<span class="info">───────┼────────────────────────────────────────────────────</span>`);
+                const lines = node.content.split('\n');
+                lines.forEach((line, i) => {
+                    appendOutput(`<span class="info">${String(i+1).padStart(6)} │</span> ${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}`);
+                });
+                appendOutput(`<span class="info">───────┴────────────────────────────────────────────────────</span>`);
+            },
+
+            exa: (args) => {
+                const flags = args.filter(a => a.startsWith('-')).join('');
+                const target = args.find(a => !a.startsWith('-')) || '.';
+                const path = resolvePath(target);
+                const node = getNode(path);
+                
+                if (!node || node.type !== 'dir') {
+                    appendOutput(`exa: '${target}': No such file or directory`, 'error');
+                    return;
+                }
+
+                if (flags.includes('l')) {
+                    appendOutput(`<span class="info">Permissions  Size User  Date Modified  Name</span>`);
+                    node.children.filter(i => !i.startsWith('.') || flags.includes('a')).forEach(item => {
+                        const itemPath = path === '/' ? '/' + item : path + '/' + item;
+                        const itemNode = getNode(itemPath);
+                        const isDir = itemNode && itemNode.type === 'dir';
+                        const size = itemNode?.content?.length || 4096;
+                        const colorClass = isDir ? 'directory' : 'file';
+                        appendOutput(`${isDir ? 'd' : '.'}rwxr-xr-x ${String(size).padStart(5)} arch  Mar 15 12:00  <span class="${colorClass}">${item}</span>`);
+                    });
+                } else {
+                    const items = node.children.filter(i => !i.startsWith('.') || flags.includes('a'));
+                    let output = items.map(item => {
+                        const itemPath = path === '/' ? '/' + item : path + '/' + item;
+                        const itemNode = getNode(itemPath);
+                        const isDir = itemNode && itemNode.type === 'dir';
+                        return `<span class="${isDir ? 'directory' : 'file'}">${item}</span>`;
+                    }).join('  ');
+                    appendOutput(output);
+                }
+            },
+
+            rust: () => {
+                appendOutput(`rustc 1.76.0 (07dca489a 2024-02-04)
+cargo 1.76.0 (c84b36747 2024-01-18)
+
+<span class="info">Rust toolchain is installed!</span>
+Use 'rustc' to compile or 'cargo' to manage projects.`);
+            },
+
+            rustc: (args) => {
+                if (args.includes('--version') || args.includes('-V')) {
+                    appendOutput('rustc 1.76.0 (07dca489a 2024-02-04)');
+                } else if (!args.length) {
+                    appendOutput('error: no input filename given', 'error');
+                } else {
+                    appendOutput(`<span class="success">Compiling ${args[0]}...</span>
+   Finished dev [unoptimized + debuginfo] target(s) in 0.42s`);
+                }
+            },
+
+            cargo: (args) => {
+                if (!args.length) {
+                    appendOutput(`<span class="info">Cargo 1.76.0</span>
+Usage: cargo [+toolchain] [OPTIONS] [COMMAND]
+
+Commands:
+    new         Create a new cargo package
+    build       Compile the current package
+    run         Run a binary or example
+    test        Run the tests
+    check       Check the current package`);
+                } else if (args[0] === 'new') {
+                    appendOutput(`<span class="success">Created</span> binary (application) \`${args[1] || 'my_project'}\` package`);
+                } else if (args[0] === 'build') {
+                    appendOutput(`   <span class="success">Compiling</span> my_project v0.1.0
+    <span class="success">Finished</span> dev [unoptimized + debuginfo] target(s) in 1.24s`);
+                } else if (args[0] === 'run') {
+                    appendOutput(`   <span class="success">Compiling</span> my_project v0.1.0
+    <span class="success">Finished</span> dev target(s) in 0.82s
+     <span class="success">Running</span> \`target/debug/my_project\`
+Hello, world!`);
+                }
+            },
+
+            go: (args) => {
+                if (!args.length) {
+                    appendOutput(`<span class="info">Go 1.22.0</span>
+Usage: go <command> [arguments]
+
+Commands:
+    build       compile packages and dependencies
+    run         compile and run Go program
+    test        test packages
+    get         download and install packages
+    mod         module maintenance
+    fmt         gofmt (reformat) package sources`);
+                } else if (args[0] === 'version') {
+                    appendOutput('go version go1.22.0 linux/amd64');
+                } else if (args[0] === 'run') {
+                    appendOutput(`<span class="success">Running...</span>
+Hello from Go!`);
+                } else {
+                    appendOutput(`go: ${args.join(' ')} (simulated)`);
+                }
+            },
+
+            node: (args) => {
+                if (args.includes('--version') || args.includes('-v')) {
+                    appendOutput('v21.6.2');
+                } else if (!args.length) {
+                    appendOutput(`Welcome to Node.js v21.6.2.
+Type ".help" for more information.
+> <span class="info">(Use node filename.js to run scripts)</span>`);
+                } else {
+                    appendOutput(`<span class="success">Running ${args[0]}...</span>
+Hello from Node.js!`);
+                }
+            },
+
+            npm: (args) => {
+                if (!args.length) {
+                    appendOutput(`<span class="info">npm 10.4.0</span>
+Usage: npm <command>
+
+Common commands: install, start, run, test, init`);
+                } else if (args[0] === 'install' || args[0] === 'i') {
+                    const pkg = args[1] || '';
+                    appendOutput(`<span class="info">npm</span> installing ${pkg || 'dependencies'}...
+added ${Math.floor(Math.random() * 100 + 50)} packages in ${(Math.random() * 5 + 1).toFixed(1)}s`);
+                } else {
+                    appendOutput(`npm: ${args.join(' ')} (simulated)`);
+                }
+            },
+
+            python3: (args) => {
+                if (args.includes('--version') || args.includes('-V')) {
+                    appendOutput('Python 3.11.8');
+                } else if (!args.length) {
+                    appendOutput(`Python 3.11.8 (main, Feb 12 2024, 00:00:00) [GCC 13.2.1] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> <span class="info">(Interactive mode simulated - use python3 script.py)</span>`);
+                } else {
+                    const file = args[0];
+                    const path = resolvePath(file);
+                    const node = getNode(path);
+                    if (node && node.content) {
+                        appendOutput(`<span class="success">Running ${file}...</span>
+Hello from Arch Linux!
+BTW, I use Arch.`);
+                    } else {
+                        appendOutput(`python3: can't open file '${file}': No such file`, 'error');
+                    }
+                }
+            },
+
+            pip: (args) => {
+                if (!args.length) {
+                    appendOutput(`<span class="info">pip 24.0</span>
+Usage: pip <command> [options]
+
+Commands: install, uninstall, list, show, search`);
+                } else if (args[0] === 'install') {
+                    appendOutput(`Collecting ${args[1] || 'package'}
+  Downloading ${args[1] || 'package'}-1.0.0.tar.gz (${Math.floor(Math.random()*500+100)} kB)
+Installing collected packages: ${args[1] || 'package'}
+<span class="success">Successfully installed ${args[1] || 'package'}-1.0.0</span>`);
+                } else if (args[0] === 'list') {
+                    appendOutput(`Package    Version
+---------- -------
+pip        24.0
+setuptools 69.1.0
+wheel      0.42.0`);
+                }
+            },
+
+            postgresql: () => {
+                appendOutput(`<span class="info">PostgreSQL 16.2</span>
+psql (PostgreSQL) 16.2
+Use 'psql' to connect to database.
+systemctl start postgresql to start the service.`);
+            },
+
+            psql: (args) => {
+                appendOutput(`psql (16.2)
+Type "help" for help.
+
+postgres=# <span class="info">(Database shell simulated)</span>`);
+            },
+
+            redis: () => {
+                appendOutput(`<span class="info">Redis 7.2.4</span>
+Use 'redis-server' to start Redis.
+Use 'redis-cli' to connect.`);
+            },
+
+            'redis-cli': () => {
+                appendOutput(`127.0.0.1:6379> <span class="info">(Redis CLI simulated)</span>
+Try: SET key value, GET key, KEYS *`);
+            },
+
+            'redis-server': () => {
+                appendOutput(`<span class="info">Redis 7.2.4 (00000000/0) 64 bit</span>
+Running in standalone mode
+Port: 6379
+PID: ${Math.floor(Math.random() * 10000)}
+<span class="success">Ready to accept connections</span> (simulated)`);
+            },
+
+            neofetch: () => {
+                commands.neofetch();
+            }
+        };
+
+        // Check if a package is installed
+        function isPackageInstalled(pkgName) {
+            return installedPackages.some(p => p.name === pkgName);
+        }
+
+        function executeCommand(input) {
+            const parts = input.trim().split(/\s+/);
+            const cmd = parts[0];
+            const args = parts.slice(1);
+
+            if (!cmd) return;
+
+            // Check built-in commands first
+            if (commands[cmd]) {
+                commands[cmd](args);
+                return;
+            }
+
+            // Check if it's a package command
+            if (packageCommands[cmd]) {
+                // Find the package name (might be different from command name)
+                const pkgMapping = {
+                    'rg': 'ripgrep',
+                    'obs': 'obs-studio',
+                    'rustc': 'rust',
+                    'cargo': 'rust',
+                    'psql': 'postgresql',
+                    'redis-cli': 'redis',
+                    'redis-server': 'redis',
+                    'node': 'nodejs',
+                    'npm': 'nodejs',
+                    'python3': 'python',
+                    'pip': 'python'
+                };
+                
+                const requiredPkg = pkgMapping[cmd] || cmd;
+                
+                if (isPackageInstalled(requiredPkg)) {
+                    packageCommands[cmd](args);
+                } else {
+                    appendOutput(`bash: ${cmd}: command not found`, 'error');
+                    appendOutput(`<span class="info">Hint: Install with 'pacman -S ${requiredPkg}'</span>`);
+                }
+                return;
+            }
+
+            // Command not found
+            appendOutput(`bash: ${cmd}: command not found`, 'error');
+        }
+
+        function handleCommand(input) {
+            // Show the command that was entered
+            const commandLine = document.createElement('div');
+            commandLine.className = 'output-line';
+            commandLine.innerHTML = getPrompt() + '<span style="color:#fff">' + input.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>';
+            outputEl.appendChild(commandLine);
+
+            if (input.trim()) {
+                commandHistory.push(input);
+                historyIndex = commandHistory.length;
+            }
+
+            executeCommand(input);
+        }
+
+        // Event Listeners
+        inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                handleCommand(inputEl.value);
+                inputEl.value = '';
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    inputEl.value = commandHistory[historyIndex];
+                }
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    inputEl.value = commandHistory[historyIndex];
+                } else {
+                    historyIndex = commandHistory.length;
+                    inputEl.value = '';
+                }
+            } else if (e.key === 'Tab') {
+                e.preventDefault();
+                // Simple tab completion
+                const current = inputEl.value.split(' ').pop();
+                const cmdList = Object.keys(commands);
+                const match = cmdList.find(c => c.startsWith(current));
+                if (match) {
+                    const parts = inputEl.value.split(' ');
+                    parts[parts.length - 1] = match;
+                    inputEl.value = parts.join(' ');
+                }
+            } else if (e.key === 'l' && e.ctrlKey) {
+                e.preventDefault();
+                commands.clear();
+            } else if (e.key === 'c' && e.ctrlKey) {
+                e.preventDefault();
+                const commandLine = document.createElement('div');
+                commandLine.className = 'output-line';
+                commandLine.innerHTML = getPrompt() + inputEl.value + '^C';
+                outputEl.appendChild(commandLine);
+                inputEl.value = '';
+            }
+        });
+
+        terminalBody.addEventListener('click', () => {
+            inputEl.focus();
+        });
+
+        // Initialize
+        updatePrompt();
+        appendOutput(`<span class="info">Arch Linux 6.7.0-arch1-1 (tty1)</span>
+
+Welcome to <span class="ascii-art">Arch Linux</span>!
+Type <span class="success">'help'</span> for available commands or <span class="success">'neofetch'</span> for system info.
+`);
+        inputEl.focus();
+    </script>
+</body>
+</html>
